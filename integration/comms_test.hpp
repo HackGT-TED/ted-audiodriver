@@ -7,7 +7,7 @@
 #include "../src/Songbird/SongbirdUART.h"
 
 #define SERIAL_BAUD 115200
-#define COMMS_BAUD 9600
+#define COMMS_BAUD 38400
 
 //Serial node object with software serial on pins 26 (RX) and 27 (TX)
 SoftwareSerial serial(26, 27); 
@@ -16,7 +16,7 @@ SongbirdUART uart("UART Node", serial);
 std::shared_ptr<SongbirdCore> core;
 
 void setup() {
-    // Initialize UART and protocol
+    // Initialize serial debug
     Serial.begin(SERIAL_BAUD);
     delay(2000);
     Serial.println("[Comms Test] UART Master Test...");
