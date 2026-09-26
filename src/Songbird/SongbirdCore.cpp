@@ -445,6 +445,10 @@ void SongbirdCore::parseData(const uint8_t* data, std::size_t length, IPAddress 
     } else if (processMode == STREAM) {
         // Adds data to readBuffer
         appendToReadBuffer(data, length);
+        // Record byte arrival time so fragmented frames can accumulate.
+        if (length > 0) {
+            lastDataTimeMs = millis();
+        }
         // Process COBS-encoded packets in readBuffer
         while (true) {
             std::shared_ptr<Packet> pkt = packetFromStreamCOBS();

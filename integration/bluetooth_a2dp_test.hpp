@@ -15,7 +15,7 @@ static I2SClass i2s;
 static BluetoothA2DPSink a2dpSink(i2s);
 static unsigned long lastLogMs = 0;
 
-inline void setupBluetoothA2DPTest() {
+void setup() {
     Serial.begin(115200);
     delay(1000);
 
@@ -33,7 +33,7 @@ inline void setupBluetoothA2DPTest() {
     Serial.println("[A2DP Test] Started. Pair and stream audio to 'TED-A2DP-Test'.");
 }
 
-inline void loopBluetoothA2DPTest() {
+void loop() {
     if (millis() - lastLogMs >= 5000) {
         lastLogMs = millis();
         Serial.println("[A2DP Test] Waiting for or receiving stream...");

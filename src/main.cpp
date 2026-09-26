@@ -6,10 +6,13 @@
 #define INTEGRATION_TESTING
 
 #ifdef INTEGRATION_TESTING
-#include "../integration/bluetooth_a2dp_test.hpp" // Testing file to run
-#endif
-//////////////////////////////////////////////////////////////
+#include <Arduino.h>
+#include "Songbird/SongbirdCore.h"
+#include "Songbird/SongbirdUART.h"
+#include "../integration/comms_test.hpp" // Testing file to run
 
+//////////////////////////////////////////////////////////////
+#else
 
 #include <Arduino.h>
 
@@ -17,24 +20,16 @@
 int myFunction(int, int);
 
 void setup() {
-#ifdef INTEGRATION_TESTING
-  setupBluetoothA2DPTest();
-#else
-  // put your setup code here, to run once:
-  int result = myFunction(2, 3);
-  (void)result;
-#endif
+
 }
 
 void loop() {
-#ifdef INTEGRATION_TESTING
-  loopBluetoothA2DPTest();
-#else
-  // put your main code here, to run repeatedly:
-#endif
+
 }
 
 // put function definitions here:
 int myFunction(int x, int y) {
   return x + y;
 }
+
+#endif // INTEGRATION_TESTING
