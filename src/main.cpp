@@ -18,15 +18,15 @@
 #include <cstring>
 #include <SoftwareSerial.h>
 
-#include "Songbird/SongbirdCore.h"
-#include "Songbird/SongbirdUART.h"
+#include "SongbirdCore.h"
+#include "SongbirdUART.h"
 #include "comms/BluetoothA2DP.h"
 
 #define SERIAL_BAUD 115200
 #define COMMS_BAUD 38400
 #define AMPLITUDE_PACKET_HEADER 0x10
 
-static SoftwareSerial songbirdSerial(12, 13);
+static SoftwareSerial songbirdSerial(26, 27);
 static SongbirdUART uart("Bluetooth Amplitude", songbirdSerial);
 static BluetoothA2DP bluetoothA2DP("TED-A2DP-Test");
 static std::shared_ptr<SongbirdCore> protocol;
@@ -34,7 +34,7 @@ static std::shared_ptr<SongbirdCore> protocol;
 static volatile float latestLeftAmplitude = 0.0f;
 static volatile float latestRightAmplitude = 0.0f;
 static volatile bool amplitudeReady = false;
-float audio2hapticsGain = 2000.f; // Gain factor for audio to haptics conversion
+float audio2hapticsGain = 1.f; // Gain factor for audio to haptics conversion
 
 static void onBluetoothAudioData(const uint8_t* data, uint32_t length) {
 	const uint32_t frameCount = length / (sizeof(int16_t) * 2);

@@ -3,8 +3,8 @@
 
 #include <Arduino.h>
 #include <SoftwareSerial.h>
-#include "../src/Songbird/SongbirdCore.h"
-#include "../src/Songbird/SongbirdUART.h"
+#include "SongbirdCore.h"
+#include "SongbirdUART.h"
 
 #define SERIAL_BAUD 115200
 #define COMMS_BAUD 38400
