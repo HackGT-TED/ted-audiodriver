@@ -9,7 +9,7 @@
 #include <Arduino.h>
 #include "SongbirdCore.h"
 #include "SongbirdUART.h"
-#include "../integration/bluetooth_a2dp_test.hpp" // Testing file to run
+#include "../integration/foc_motor_standalone_test.hpp" // Testing file to run
 
 //////////////////////////////////////////////////////////////
 #else
