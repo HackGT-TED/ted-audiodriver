@@ -2,8 +2,16 @@
 
 BluetoothA2DP* BluetoothA2DP::activeInstance = nullptr;
 
-BluetoothA2DP::BluetoothA2DP(const char* deviceName)
-    : btDeviceName(deviceName),
+BluetoothA2DP::BluetoothA2DP(const char* deviceName,
+                                                         uint8_t bckPin,
+                                                         uint8_t lrcPin,
+                                                         uint8_t dataPin)
+        : i2s(),
+            sink(i2s),
+            btDeviceName(deviceName),
+            i2sBckPin(bckPin),
+            i2sLrcPin(lrcPin),
+            i2sDataPin(dataPin),
       lastLogMs(0),
       rxChunkCount(0),
       rxBytesTotal(0),
@@ -19,10 +27,22 @@ void BluetoothA2DP::setAudioDataCallback(AudioDataCallback callback) {
 void BluetoothA2DP::begin() {
     activeInstance = this;
 
+    i2s.setPins(i2sBckPin, i2sLrcPin, i2sDataPin);
+    if (!i2s.begin(I2S_MODE_STD, 44100, I2S_DATA_BIT_WIDTH_16BIT,
+                   I2S_SLOT_MODE_STEREO, I2S_STD_SLOT_BOTH)) {
+        Serial.println("[A2DP Test] Failed to initialize I2S output.");
+        while (true) {
+            delay(1000);
+        }
+    }
+
     Serial.println("[A2DP Test] Initializing Bluetooth A2DP sink...");
+    sink.set_i2s_ringbuffer_size(64 * 1024);
+    sink.set_i2s_stack_size(4096);
+    sink.set_i2s_ringbuffer_prefetch_percent(50);
     sink.set_on_connection_state_changed(onConnectionStateChangedStatic, this);
     sink.set_on_audio_state_changed(onAudioStateChangedStatic, this);
-    sink.set_stream_reader(onStreamDataStatic, false);
+    sink.set_stream_reader(onStreamDataStatic, true);
     sink.set_auto_reconnect(true);
     sink.start(btDeviceName);
 

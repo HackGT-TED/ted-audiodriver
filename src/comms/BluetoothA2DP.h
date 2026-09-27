@@ -2,13 +2,17 @@
 #define BLUETOOTH_A2DP_H
 
 #include <Arduino.h>
-#include <BluetoothA2DPSink.h>
+#include <ESP_I2S.h>
+#include <BluetoothA2DPSinkQueued.h>
 
 class BluetoothA2DP {
 public:
     using AudioDataCallback = void (*)(const uint8_t* data, uint32_t length);
 
-    explicit BluetoothA2DP(const char* deviceName = "TED-A2DP-Test");
+    explicit BluetoothA2DP(const char* deviceName = "TED-A2DP-Test",
+                           uint8_t bckPin = 26,
+                           uint8_t lrcPin = 25,
+                           uint8_t dataPin = 22);
 
     void begin();
     void update();
@@ -17,8 +21,12 @@ public:
 private:
     static BluetoothA2DP* activeInstance;
 
-    BluetoothA2DPSink sink;
+    I2SClass i2s;
+    BluetoothA2DPSinkQueued sink;
     const char* btDeviceName;
+    uint8_t i2sBckPin;
+    uint8_t i2sLrcPin;
+    uint8_t i2sDataPin;
     unsigned long lastLogMs;
     uint32_t rxChunkCount;
     uint32_t rxBytesTotal;
