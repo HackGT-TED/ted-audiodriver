@@ -38,7 +38,7 @@ void BluetoothA2DP::begin() {
 
     Serial.println("[A2DP Test] Initializing Bluetooth A2DP sink...");
     sink.set_i2s_ringbuffer_size(64 * 1024);
-    sink.set_i2s_stack_size(4096);
+    sink.set_i2s_stack_size(2048);
     sink.set_i2s_ringbuffer_prefetch_percent(50);
     sink.set_on_connection_state_changed(onConnectionStateChangedStatic, this);
     sink.set_on_audio_state_changed(onAudioStateChangedStatic, this);

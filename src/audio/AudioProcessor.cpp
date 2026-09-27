@@ -3,16 +3,24 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <cstdlib>
 #include <ArduinoFFT.h>
+#include "esp_system.h"
+
+static constexpr uint16_t DOWNSAMPLE_FACTOR = 22;
 
 AudioProcessor::AudioProcessor(const Config& config, MotorCommandCallback callback)
     : config(config),
       callback(callback),
       queue(nullptr),
-      samples{},
       sampleCount(0),
+    downsampleCount(0),
+    downsampleAccumulator(0),
+    overlapSamples{},
       realSpectrum{},
-      imaginarySpectrum{} {}
+    imaginarySpectrum{},
+    processedWindowCount(0),
+    lastChunkLength(0) {}
 
 bool AudioProcessor::begin() {
     if (config.fftSize == 0 || config.fftSize > MAX_FFT_SIZE ||
@@ -20,7 +28,7 @@ bool AudioProcessor::begin() {
         return false;
     }
 
-    queue = xQueueCreate(config.queueDepth, sizeof(AudioChunk));
+    queue = xQueueCreate(config.queueDepth, sizeof(AudioChunk*));
     if (queue == nullptr) {
         return false;
     }
@@ -41,10 +49,25 @@ void AudioProcessor::onAudioData(const uint8_t* data, uint32_t length) {
         return;
     }
 
-    AudioChunk chunk;
-    chunk.length = length;
-    std::memcpy(chunk.data, data, length);
-    xQueueSend(queue, &chunk, 0);
+    lastChunkLength = length;
+    AudioChunk* chunk = static_cast<AudioChunk*>(std::malloc(sizeof(AudioChunk)));
+    if (chunk == nullptr) {
+        return;
+    }
+
+    chunk->length = length;
+    std::memcpy(chunk->data, data, length);
+    if (xQueueSend(queue, &chunk, 0) != pdTRUE) {
+        std::free(chunk);
+    }
+}
+
+uint32_t AudioProcessor::getProcessedWindowCount() const {
+    return processedWindowCount;
+}
+
+uint32_t AudioProcessor::getLastChunkLength() const {
+    return lastChunkLength;
 }
 
 void AudioProcessor::taskEntry(void* context) {
@@ -52,77 +75,83 @@ void AudioProcessor::taskEntry(void* context) {
 }
 
 void AudioProcessor::taskLoop() {
-    AudioChunk chunk;
+    AudioChunk* chunk = nullptr;
     while (true) {
-        if (xQueueReceive(queue, &chunk, portMAX_DELAY) == pdTRUE) {
-            processChunk(chunk);
+        if (xQueueReceive(queue, &chunk, portMAX_DELAY) == pdTRUE && chunk != nullptr) {
+            processChunk(*chunk);
+            std::free(chunk);
         }
     }
 }
 
 void AudioProcessor::processChunk(const AudioChunk& chunk) {
     const uint32_t frameCount = chunk.length / (sizeof(int16_t) * 2);
-    for (uint32_t frame = 0; frame < frameCount; ++frame) {
+    for (uint32_t frame = 0; frame < frameCount; frame = frame + 1) {
         int16_t leftSample;
         int16_t rightSample;
         const uint8_t* frameData = chunk.data + frame * sizeof(int16_t) * 2;
         std::memcpy(&leftSample, frameData, sizeof(leftSample));
         std::memcpy(&rightSample, frameData + sizeof(leftSample), sizeof(rightSample));
 
-        samples[sampleCount++] = (static_cast<double>(leftSample) + rightSample) * 0.5;
-        if (sampleCount == config.fftSize) {
-            processWindow();
-            const uint16_t overlap = config.fftSize / 2;
-            std::memmove(samples, samples + overlap,
-                         (config.fftSize - overlap) * sizeof(samples[0]));
-            sampleCount = config.fftSize - overlap;
+        downsampleAccumulator += (static_cast<int32_t>(leftSample) + rightSample) / 2;
+        downsampleCount = downsampleCount + 1;
+        if (downsampleCount == DOWNSAMPLE_FACTOR) {
+            realSpectrum[sampleCount] = static_cast<float>(downsampleAccumulator) /
+                                         DOWNSAMPLE_FACTOR;
+            sampleCount = sampleCount + 1;
+            downsampleCount = 0;
+            downsampleAccumulator = 0;
+
+            if (sampleCount == config.fftSize) {
+                const uint16_t overlap = config.fftSize / 2;
+                std::memcpy(overlapSamples, realSpectrum + overlap,
+                            overlap * sizeof(realSpectrum[0]));
+                processWindow();
+                std::memcpy(realSpectrum, overlapSamples,
+                            overlap * sizeof(realSpectrum[0]));
+                sampleCount = config.fftSize - overlap;
+            }
         }
     }
 }
 
 void AudioProcessor::processWindow() {
+    processedWindowCount = processedWindowCount + 1;
     // Performs FFT on the current window of samples
-    std::fill(realSpectrum, realSpectrum + config.fftSize, 0.0);
     std::fill(imaginarySpectrum, imaginarySpectrum + config.fftSize, 0.0);
-    std::memcpy(realSpectrum, samples, config.fftSize * sizeof(samples[0]));
 
-    ArduinoFFT<double> fft(realSpectrum, imaginarySpectrum, config.fftSize,
-                           config.sampleRate);
+    ArduinoFFT<float> fft(realSpectrum, imaginarySpectrum, config.fftSize,
+                          config.sampleRate);
     fft.windowing(FFTWindow::Hamming, FFTDirection::Forward);
     fft.compute(FFTDirection::Forward);
 
     const uint16_t halfSize = config.fftSize / 2;
-    const double binWidth = config.sampleRate / config.fftSize;
+    const float binWidth = config.sampleRate / config.fftSize;
 
-    // Apply the gain ramp to the complex bins, preserving phase and polarity.
-    realSpectrum[0] = 0.0;
-    imaginarySpectrum[0] = 0.0;
-    for (uint16_t bin = 1; bin < halfSize; ++bin) {
-        const double frequency = bin * binWidth;
-        double gain = 0.0;
-        if (frequency >= config.motorMinFrequency &&
-            frequency <= config.motorMaxFrequency) {
-            const double position = (frequency - config.motorMinFrequency) /
-                                   (config.motorMaxFrequency - config.motorMinFrequency);
-            gain = config.lowFrequencyGain +
-                   position * (config.highFrequencyGain - config.lowFrequencyGain);
+    float dominantMagnitude = 0.0f;
+    float dominantPhase = 0.0f;
+    float dominantFrequency = config.motorMinFrequency;
+    float totalWeightedMagnitude = 0.0f;
+
+    // Select the dominant frequency after applying the configured gain ramp.
+    for (uint16_t bin = 1; bin < halfSize; bin = bin + 1) {
+        const float frequency = bin * binWidth;
+        if (frequency < config.motorMinFrequency ||
+            frequency > config.motorMaxFrequency) {
+            continue;
         }
 
-        const uint16_t mirroredBin = config.fftSize - bin;
-        realSpectrum[bin] *= gain;
-        imaginarySpectrum[bin] *= gain;
-        realSpectrum[mirroredBin] = realSpectrum[bin];
-        imaginarySpectrum[mirroredBin] = -imaginarySpectrum[bin];
-    }
-    realSpectrum[halfSize] = 0.0;
-    imaginarySpectrum[halfSize] = 0.0;
-
-    fft.compute(FFTDirection::Reverse);
-
-    double peakSample = 0.0;
-    for (uint16_t sample = 0; sample < config.fftSize; ++sample) {
-        if (std::abs(realSpectrum[sample]) > std::abs(peakSample)) {
-            peakSample = realSpectrum[sample];
+        const float position = (frequency - config.motorMinFrequency) /
+                               (config.motorMaxFrequency - config.motorMinFrequency);
+        const float gain = config.lowFrequencyGain +
+                            position * (config.highFrequencyGain - config.lowFrequencyGain);
+        const float magnitude = std::hypot(realSpectrum[bin], imaginarySpectrum[bin]);
+        const float weightedMagnitude = magnitude * gain;
+        totalWeightedMagnitude += weightedMagnitude;
+        if (weightedMagnitude > dominantMagnitude) {
+            dominantMagnitude = weightedMagnitude;
+            dominantFrequency = frequency;
+            dominantPhase = std::atan2(imaginarySpectrum[bin], realSpectrum[bin]);
         }
     }
 
@@ -130,7 +159,38 @@ void AudioProcessor::processWindow() {
         return;
         }
 
-    const float motorAmplitude = static_cast<float>(std::clamp(
-        peakSample / 32768.0, -1.0, 1.0));
-    callback(motorAmplitude);
+    if (dominantMagnitude <= 1.0f) {
+        callback(0.0f, 0.0f);
+        return;
+    }
+
+    const float randomRoll = static_cast<float>(esp_random()) /
+                             static_cast<float>(UINT32_MAX);
+    if (config.randomSamplingFactor > randomRoll && totalWeightedMagnitude > 0.0f) {
+        const float target = (static_cast<float>(esp_random()) /
+                              static_cast<float>(UINT32_MAX)) * totalWeightedMagnitude;
+        float cumulativeMagnitude = 0.0f;
+
+        for (uint16_t bin = 1; bin < halfSize; bin = bin + 1) {
+            const float frequency = bin * binWidth;
+            if (frequency < config.motorMinFrequency ||
+                frequency > config.motorMaxFrequency) {
+                continue;
+            }
+
+            const float position = (frequency - config.motorMinFrequency) /
+                                   (config.motorMaxFrequency - config.motorMinFrequency);
+            const float gain = config.lowFrequencyGain +
+                               position * (config.highFrequencyGain - config.lowFrequencyGain);
+            cumulativeMagnitude +=
+                std::hypot(realSpectrum[bin], imaginarySpectrum[bin]) * gain;
+            if (cumulativeMagnitude >= target) {
+                dominantFrequency = frequency;
+                dominantPhase = std::atan2(imaginarySpectrum[bin], realSpectrum[bin]);
+                break;
+            }
+        }
+    }
+
+    callback(dominantPhase, dominantFrequency);
 }

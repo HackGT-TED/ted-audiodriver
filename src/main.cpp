@@ -32,9 +32,10 @@
 #define COMMS_BAUD 38400
 #define COMMAND_PACKET_HEADER 0x10
 #define AUDIO_SAMPLE_RATE 44100.0f
-#define HAPTIC_MIN_FREQUENCY 40.0f
-#define HAPTIC_MAX_FREQUENCY 480.0f
-#define HAPTIC_FREQUENCY_STEP 40.0f
+#define AUDIO_DOWNSAMPLE_FACTOR 22.0f
+#define HAPTIC_MIN_FREQUENCY 0.5f
+#define HAPTIC_MAX_FREQUENCY 2.0f
+#define AUDIO_IDLE_TIMEOUT_MS 100
 
 // I2S pins
 #define I2S_BCK_PIN 14
@@ -50,30 +51,48 @@ static BluetoothA2DP bluetoothA2DP("TED-A2DP-Test", I2S_BCK_PIN, I2S_LRC_PIN, I2
 static std::shared_ptr<SongbirdCore> protocol;
 #endif
 
-static volatile float latestHapticAmplitude = 0.0f;
+static volatile float latestHapticPhase = 0.0f;
+static volatile float latestHapticFrequency = 0.0f;
 static volatile bool amplitudeReady = false;
+static volatile uint32_t lastAudioDataMs = 0;
+static bool zeroSignalSent = false;
+static uint32_t lastProcessorLogMs = 0;
+static uint32_t lastLoggedWindowCount = 0;
 
-static void onMotorCommand(float amplitude) {
-	latestHapticAmplitude = amplitude;
+static void onMotorCommand(float phase, float frequency) {
+	latestHapticPhase = phase;
+	latestHapticFrequency = frequency;
 	amplitudeReady = true;
 }
 
 static AudioProcessor audioProcessor({
-	AUDIO_SAMPLE_RATE,
+	AUDIO_SAMPLE_RATE / AUDIO_DOWNSAMPLE_FACTOR,
 	HAPTIC_MIN_FREQUENCY,
 	HAPTIC_MAX_FREQUENCY,
 	0.0f,
 	1.0f,
-	256,
-	1,
+	0.5f,
 	4096,
+	1,
+	2048,
 	1,
 	1
 }, onMotorCommand);
 
 static void onBluetoothAudioData(const uint8_t* data, uint32_t length) {
+	lastAudioDataMs = millis();
+	zeroSignalSent = false;
 	audioProcessor.onAudioData(data, length);
 }
+
+#if ENABLE_MOTOR_COMMANDS
+static void sendMotorCommand(float phase, float frequency) {
+	SongbirdCore::Packet packet = protocol->createPacket(COMMAND_PACKET_HEADER);
+	packet.writeFloat(phase);
+	packet.writeFloat(frequency);
+	protocol->sendPacket(packet);
+}
+#endif
 
 void setup() {
 	// Initialize serial debug
@@ -103,25 +122,52 @@ void setup() {
 
   	bluetoothA2DP.setAudioDataCallback(onBluetoothAudioData);
 	bluetoothA2DP.begin();
+
+	#if ENABLE_MOTOR_COMMANDS
+	sendMotorCommand(0.0f, 0.0f);
+	zeroSignalSent = true;
+	#endif
 }
 
 void loop() {
   	bluetoothA2DP.update();
+	if (millis() - lastProcessorLogMs >= 2000) {
+		lastProcessorLogMs = millis();
+		const uint32_t windowCount = audioProcessor.getProcessedWindowCount();
+		Serial.print("[Audio Processor] chunksize: ");
+		Serial.print(audioProcessor.getLastChunkLength());
+		Serial.print(" FFT windows: ");
+		Serial.println(windowCount - lastLoggedWindowCount);
+		lastLoggedWindowCount = windowCount;
+	}
 
 	#if ENABLE_MOTOR_COMMANDS
+	const bool audioIdle = lastAudioDataMs == 0 ||
+		(millis() - lastAudioDataMs) > AUDIO_IDLE_TIMEOUT_MS;
+	if (audioIdle) {
+		amplitudeReady = false;
+		if (!zeroSignalSent) {
+			sendMotorCommand(0.0f, 0.0f);
+			zeroSignalSent = true;
+			Serial.println("[Bluetooth 2 Haptics] Sending zero: audio idle");
+		}
+		return;
+	}
+
 	if (!amplitudeReady) {
     	return;
   	}
 
-	const float hapticAmplitude = latestHapticAmplitude;
+	const float hapticPhase = latestHapticPhase;
+	const float hapticFrequency = latestHapticFrequency;
   	amplitudeReady = false;
-
-	SongbirdCore::Packet packet = protocol->createPacket(COMMAND_PACKET_HEADER);
-	packet.writeFloat(hapticAmplitude);
-	Serial.print("[Bluetooth 2 Haptics] Sending amplitude: ");
-	Serial.print(hapticAmplitude, 6);
+	
+	sendMotorCommand(hapticPhase, hapticFrequency);
+	Serial.print("[Bluetooth 2 Haptics] Sending phase: ");
+	Serial.print(hapticPhase, 4);
+	Serial.print(" frequency: ");
+	Serial.print(hapticFrequency, 3);
 	Serial.println();
-	protocol->sendPacket(packet);
 	#endif
 }
 

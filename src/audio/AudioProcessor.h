@@ -13,6 +13,7 @@ public:
         float motorMaxFrequency;
         float lowFrequencyGain;
         float highFrequencyGain;
+        float randomSamplingFactor;
         uint16_t fftSize;
         uint8_t queueDepth;
         uint32_t taskStackSize;
@@ -20,16 +21,18 @@ public:
         BaseType_t taskCore;
     };
 
-    using MotorCommandCallback = void (*)(float amplitude);
+    using MotorCommandCallback = void (*)(float phase, float frequency);
 
     AudioProcessor(const Config& config, MotorCommandCallback callback);
 
     bool begin();
     void onAudioData(const uint8_t* data, uint32_t length);
+    uint32_t getProcessedWindowCount() const;
+    uint32_t getLastChunkLength() const;
 
 private:
-    static constexpr uint32_t MAX_AUDIO_CHUNK_BYTES = 2048;
-    static constexpr uint16_t MAX_FFT_SIZE = 1024;
+    static constexpr uint32_t MAX_AUDIO_CHUNK_BYTES = 8192;
+    static constexpr uint16_t MAX_FFT_SIZE = 4096;
 
     struct AudioChunk {
         uint32_t length;
@@ -44,10 +47,14 @@ private:
     Config config;
     MotorCommandCallback callback;
     QueueHandle_t queue;
-    double samples[MAX_FFT_SIZE];
     uint16_t sampleCount;
-    double realSpectrum[MAX_FFT_SIZE];
-    double imaginarySpectrum[MAX_FFT_SIZE];
+    uint16_t downsampleCount;
+    int32_t downsampleAccumulator;
+    float overlapSamples[MAX_FFT_SIZE / 2];
+    float realSpectrum[MAX_FFT_SIZE];
+    float imaginarySpectrum[MAX_FFT_SIZE];
+    volatile uint32_t processedWindowCount;
+    volatile uint32_t lastChunkLength;
 };
 
 #endif
