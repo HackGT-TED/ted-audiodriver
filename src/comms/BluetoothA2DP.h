@@ -3,21 +3,7 @@
 
 #include <Arduino.h>
 #include <ESP_I2S.h>
-#include <BluetoothA2DPSinkQueued.h>
-
-class GuardedBluetoothA2DPSinkQueued : public BluetoothA2DPSinkQueued {
-public:
-    explicit GuardedBluetoothA2DPSinkQueued(Print& output)
-        : BluetoothA2DPSinkQueued(output) {}
-
-protected:
-    size_t write_audio(const uint8_t* data, size_t size) override {
-        if (s_ringbuf_i2s == nullptr || s_i2s_write_semaphore == nullptr) {
-            return 0;
-        }
-        return BluetoothA2DPSinkQueued::write_audio(data, size);
-    }
-};
+#include <BluetoothA2DPSink.h>
 
 class BluetoothA2DP {
 public:
@@ -36,7 +22,7 @@ private:
     static BluetoothA2DP* activeInstance;
 
     I2SClass i2s;
-    GuardedBluetoothA2DPSinkQueued sink;
+    BluetoothA2DPSink sink;
     const char* btDeviceName;
     uint8_t i2sBckPin;
     uint8_t i2sLrcPin;

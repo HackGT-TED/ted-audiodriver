@@ -2,10 +2,15 @@
 #define BLUETOOTH_A2DP_TEST_HPP
 
 #include <Arduino.h>
-
+#include <ESP_I2S.h>
 #include <BluetoothA2DPSink.h>
 
-static BluetoothA2DPSink a2dpSink;
+static constexpr uint8_t I2S_BCK_PIN = 14;
+static constexpr uint8_t I2S_LRC_PIN = 25;
+static constexpr uint8_t I2S_DATA_PIN = 22;
+
+static I2SClass i2s;
+static BluetoothA2DPSink a2dpSink(i2s);
 static unsigned long lastLogMs = 0;
 static volatile uint32_t rxChunkCount = 0;
 static volatile uint32_t rxBytesTotal = 0;
@@ -59,13 +64,23 @@ void setup() {
     Serial.begin(115200);
     delay(1000);
 
-    Serial.println("[A2DP Test] Initializing Bluetooth A2DP sink...");
+    Serial.println("[A2DP/I2S Test] Initializing I2S...");
+    i2s.setPins(I2S_BCK_PIN, I2S_LRC_PIN, I2S_DATA_PIN);
+    if (!i2s.begin(I2S_MODE_STD, 44100, I2S_DATA_BIT_WIDTH_16BIT,
+                   I2S_SLOT_MODE_STEREO, I2S_STD_SLOT_BOTH)) {
+        Serial.println("[A2DP/I2S Test] Failed to initialize I2S.");
+        while (true) {
+            delay(1000);
+        }
+    }
+
+    Serial.println("[A2DP/I2S Test] Initializing Bluetooth A2DP sink...");
     a2dpSink.set_on_connection_state_changed(onConnectionStateChanged);
     a2dpSink.set_on_audio_state_changed(onAudioStateChanged);
-    a2dpSink.set_stream_reader(onStreamData, false);
+    a2dpSink.set_stream_reader(onStreamData, true);
     a2dpSink.set_auto_reconnect(true);
     a2dpSink.start("TED-A2DP-Test");
-    Serial.println("[A2DP Test] Started. Pair to 'TED-A2DP-Test' and start playback.");
+    Serial.println("[A2DP/I2S Test] Started. Pair to 'TED-A2DP-Test' and start playback.");
 }
 
 void loop() {

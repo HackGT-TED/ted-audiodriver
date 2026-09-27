@@ -7,9 +7,9 @@
 
 #ifdef INTEGRATION_TESTING
 #include <Arduino.h>
-#include "Songbird/SongbirdCore.h"
-#include "Songbird/SongbirdUART.h"
-#include "../integration/blink_test.hpp" // Testing file to run
+#include "SongbirdCore.h"
+#include "SongbirdUART.h"
+#include "../integration/bluetooth_a2dp_test.hpp" // Testing file to run
 
 //////////////////////////////////////////////////////////////
 #else
